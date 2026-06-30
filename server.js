@@ -39,6 +39,10 @@ function loadConfig() {
       log('Error reading config.json: ' + e.message);
     }
   }
+  
+  if (process.env.TELEGRAM_TOKEN) config.telegram_token = process.env.TELEGRAM_TOKEN;
+  if (process.env.TELEGRAM_CHAT_ID) config.telegram_chat_id = process.env.TELEGRAM_CHAT_ID;
+  if (process.env.VIDIQ_API_KEY) config.vidiq_api_key = process.env.VIDIQ_API_KEY;
 }
 
 function saveConfig() {
