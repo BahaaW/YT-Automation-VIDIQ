@@ -2,7 +2,11 @@ import { spawn } from 'child_process';
 import dotenv from 'dotenv';
 dotenv.config();
 
-const token = process.env.VIDIQ_TOKEN || 'vidiq_fbp35c01WLKBpeW9H5nhnoJEKKS2NcmtWYj_yvZX';
+const token = process.env.VIDIQ_TOKEN;
+if (!token) {
+  console.error("Error: VIDIQ_TOKEN environment variable is not set.");
+  process.exit(1);
+}
 const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
 const proc = spawn(command, [
