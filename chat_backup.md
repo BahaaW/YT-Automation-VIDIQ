@@ -21,7 +21,7 @@ add the vidiq mcp to antigravity
 
 in cursor, the format is like this
 
-vidiq_fbp35c01WLKBpeW9H5nhnoJEKKS2NcmtWYj_yvZX
+<REDACTED_VIDIQ_TOKEN>
 
 this is the api key
 
@@ -61,7 +61,7 @@ Here is the entry I inserted, replacing that sad, leftover local script stub:
         "mcp-remote",
         "https://mcp.vidiq.com/mcp",
         "--header",
-        "Authorization: Bearer vidiq_fbp35c01WLKBpeW9H5nhnoJEKKS2NcmtWYj_yvZX"
+        "Authorization: Bearer <REDACTED_VIDIQ_TOKEN>"
       ]
     }
 ```
@@ -175,7 +175,7 @@ When we try to run `npx` (which on Windows is `npx.cmd`) directly or through Nod
 
 I have fixed this by doing the following:
 1. Reverted [mcp_config.json](file:///C:/Users/bahaa/.gemini/antigravity/mcp_config.json) to use the original `node` wrapper command pointing to [vidiq.js](file:///C:/Users/bahaa/.gemini/antigravity/bin/vidiq.js). 
-2. Updated [vidiq.js](file:///C:/Users/bahaa/.gemini/antigravity/bin/vidiq.js) with your new API key `vidiq_fbp35c01WLKBpeW9H5nhnoJEKKS2NcmtWYj_yvZX` and wrapped the header argument in escaped double quotes so cmd.exe can't chew it up.
+2. Updated [vidiq.js](file:///C:/Users/bahaa/.gemini/antigravity/bin/vidiq.js) with your new API key `<REDACTED_VIDIQ_TOKEN>` and wrapped the header argument in escaped double quotes so cmd.exe can't chew it up.
 
 I verified the connection locally, and it successfully authenticated and established the STDIO-SSE proxy.
 
