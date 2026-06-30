@@ -113,23 +113,34 @@ const clientSecretsPath = path.join(__dirname, 'client_secrets.json');
 let oauth2Client = null;
 
 function initYoutubeAuth() {
-  if (!fs.existsSync(clientSecretsPath)) {
-    log('client_secrets.json not found. YouTube uploading is disabled.');
+  let clientId = process.env.YOUTUBE_CLIENT_ID;
+  let clientSecret = process.env.YOUTUBE_CLIENT_SECRET;
+  let redirectUri = process.env.YOUTUBE_REDIRECT_URI;
+  
+  if (fs.existsSync(clientSecretsPath)) {
+    try {
+      const content = JSON.parse(fs.readFileSync(clientSecretsPath, 'utf8'));
+      const keys = content.web || content.installed;
+      if (keys) {
+        clientId = keys.client_id;
+        clientSecret = keys.client_secret;
+        redirectUri = keys.redirect_uris ? keys.redirect_uris[0] : redirectUri;
+      }
+    } catch (e) {
+      log('Error reading client_secrets.json: ' + e.message);
+    }
+  }
+  
+  if (!clientId || !clientSecret) {
+    log('YouTube credentials missing. Please set YOUTUBE_CLIENT_ID/YOUTUBE_CLIENT_SECRET or provide client_secrets.json. YouTube uploading is disabled.');
     return;
   }
   
   try {
-    const content = JSON.parse(fs.readFileSync(clientSecretsPath, 'utf8'));
-    const keys = content.web || content.installed;
-    if (!keys) {
-      log('Invalid client_secrets.json structure.');
-      return;
-    }
-    
     oauth2Client = new google.auth.OAuth2(
-      keys.client_id,
-      keys.client_secret,
-      keys.redirect_uris ? keys.redirect_uris[0] : 'http://localhost:' + PORT + '/api/auth/youtube/callback'
+      clientId,
+      clientSecret,
+      redirectUri || 'http://localhost:' + PORT + '/api/auth/youtube/callback'
     );
     
     if (fs.existsSync(oauthTokenPath)) {
@@ -219,8 +230,8 @@ async function startClippingPipeline(runEntry, url, prompt) {
   let client;
   try {
     const transport = new StdioClientTransport({
-      command: 'C:\\Program Files\\nodejs\\node.exe',
-      args: ['C:\\Users\\bahaa\\.gemini\\antigravity\\bin\\vidiq.js']
+      command: 'node',
+      args: [path.join(__dirname, 'vidiq_wrapper.js')]
     });
     
     client = new Client({ name: 'vidiq-telegram-bot', version: '1.0.0' }, { capabilities: {} });
