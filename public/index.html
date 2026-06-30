@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VidIQ Automation Command Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="glass-bg"></div>
+  <div class="glow-sphere orange"></div>
+  <div class="glow-sphere purple"></div>
+  
+  <div class="container">
+    <header class="app-header">
+      <div class="logo-area">
+        <svg class="vidiq-logo" viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polygon points="23 7 16 12 23 17 23 7" fill="currentColor"/>
+          <rect x="1" y="5" width="15" height="14" rx="2" ry="2" fill="currentColor" opacity="0.3"/>
+        </svg>
+        <h1>VidIQ <span>AutoClipper</span></h1>
+      </div>
+      <div class="system-badge" id="systemStateBadge">
+        <span class="pulse-indicator"></span>
+        <span class="status-text">SYSTEM ACTIVE</span>
+      </div>
+    </header>
+
+    <main class="dashboard-grid">
+      <!-- COLUMN 1: CONFIGURATION & INTEGRATIONS -->
+      <section class="card glass-card span-1">
+        <h2><span class="icon">🔌</span> Integrations & Config</h2>
+        
+        <div class="status-group">
+          <div class="status-item">
+            <div class="status-label">
+              <strong>YouTube API Status</strong>
+              <span class="badge" id="ytStatusBadge">Checking...</span>
+            </div>
+            <button class="btn btn-primary" id="btnConnectYoutube">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+              Link YouTube Channel
+            </button>
+          </div>
+
+          <div class="status-item">
+            <div class="status-label">
+              <strong>Telegram Connection</strong>
+              <span class="badge" id="tgStatusBadge">Checking...</span>
+            </div>
+          </div>
+        </div>
+
+        <form id="configForm" class="settings-form">
+          <div class="form-group">
+            <label for="tgToken">Telegram Bot Token</label>
+            <input type="password" id="tgToken" placeholder="7890123:AAFj-ExampleToken...">
+          </div>
+          
+          <div class="form-group">
+            <label for="tgChatId">Telegram Chat ID (Owner)</label>
+            <input type="text" id="tgChatId" placeholder="123456789">
+            <small class="help-text">Starts with your /start command on Telegram</small>
+          </div>
+
+          <div class="form-group">
+            <label for="scheduleTime">Daily Prompt Scheduler (Local Server Time)</label>
+            <input type="time" id="scheduleTime" value="09:00">
+          </div>
+
+          <button type="submit" class="btn btn-success">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg>
+            Save Settings
+          </button>
+        </form>
+      </section>
+
+      <!-- COLUMN 2: RUN WORKFLOW MANUALLY -->
+      <section class="card glass-card span-1">
+        <h2><span class="icon">🚀</span> Trigger Manual Job</h2>
+        <p class="section-desc">Instantly queue a clipping job. It will bypass the scheduler but will still upload to Shorts once completed.</p>
+        
+        <form id="triggerForm" class="trigger-form">
+          <div class="form-group">
+            <label for="videoUrl">YouTube Video URL</label>
+            <input type="url" id="videoUrl" required placeholder="https://www.youtube.com/watch?v=..." class="url-input">
+          </div>
+
+          <div class="form-group">
+            <label for="prompt">steer Selection Prompt (Optional)</label>
+            <textarea id="prompt" rows="3" placeholder="Explain what moments to prioritize. Example: funniest jokes, loudest arguments, high energy coding sessions..."></textarea>
+          </div>
+
+          <button type="submit" class="btn btn-action" id="btnTrigger">
+            <span class="btn-text">Execute Clipping Run</span>
+            <div class="spinner hidden"></div>
+          </button>
+        </form>
+      </section>
+
+      <!-- COLUMN 3: RUN HISTORY -->
+      <section class="card glass-card span-2 history-card">
+        <h2><span class="icon">📋</span> Job Runs History</h2>
+        <div class="history-list" id="historyList">
+          <div class="empty-state">No jobs run yet. Set up configurations and trigger one!</div>
+        </div>
+      </section>
+    </main>
+
+    <!-- LIVE CONSOLE LOGS -->
+    <section class="card glass-card console-card">
+      <div class="console-header">
+        <h2><span class="icon">💻</span> Live Service Output Logs</h2>
+        <button class="btn btn-sm btn-outline" id="btnClearLogs">Clear Display</button>
+      </div>
+      <div class="console-body" id="consoleLogs">
+        [System Initialization Log Screen]
+      </div>
+    </section>
+  </div>
+</body>
+</html>
