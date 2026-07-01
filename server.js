@@ -266,7 +266,14 @@ app.get('/api/auth/youtube/callback', async (req, res) => {
 
   if (!code) {
     log('YouTube OAuth callback missing authorization code. Query: ' + JSON.stringify(req.query));
-    return res.status(400).send(`Missing authorization code. Make sure the redirect URI below matches what's in <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a>:<br><br><code>${youtubeRedirectUri}</code>`);
+    return res.status(400).send(`<html><body>
+      <h3>Missing Authorization Code</h3>
+      <p>Query parameters received: <code>${escapeHtml(JSON.stringify(req.query))}</code></p>
+      <p>Make sure this redirect URI:</p>
+      <pre>${youtubeRedirectUri}</pre>
+      <p>matches what's in <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a>.</p>
+      <p>If you see <code>{}</code> above, it means no query parameters were passed, which can happen if you refreshed the page or if a redirect stripped them.</p>
+      </body></html>`);
   }
   try {
     const { tokens } = await oauth2Client.getToken(code);
