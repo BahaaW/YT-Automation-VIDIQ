@@ -593,9 +593,22 @@ function initTelegramBot() {
       handleTriggerInput(args, ctx);
     });
 
+    // Register ALL commands before the catch-all text handler, otherwise
+    // Telegraf routes command messages to bot.on('text') first.
+    bot.command('donnie', async (ctx) => {
+      try { await handleDonnieCommand(ctx); }
+      catch (e) {
+        log(`Donnie command error: ${e.message}`);
+        ctx.reply(`❌ ${e.message}`);
+      }
+    });
+
     bot.on('text', (ctx) => {
       const text = ctx.message.text;
       const replyTo = ctx.message.reply_to_message;
+      if (text && text.startsWith('/')) {
+        return ctx.reply('Unknown command. Type /help for the full list.');
+      }
       if (config.state === 'waiting_for_input') {
         handleTriggerInput(text, ctx);
       } else if (config.state === 'waiting_for_viral_pick') {
@@ -608,14 +621,6 @@ function initTelegramBot() {
         }
       } else {
         ctx.reply(`Bot is currently \`${config.state}\`. Use /donnie or /clip. Type /help.`);
-      }
-    });
-
-    bot.command('donnie', async (ctx) => {
-      try { await handleDonnieCommand(ctx); }
-      catch (e) {
-        log(`Donnie command error: ${e.message}`);
-        ctx.reply(`❌ ${e.message}`);
       }
     });
 
