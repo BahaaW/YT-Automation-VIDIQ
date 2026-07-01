@@ -87,6 +87,7 @@ function log(msg) {
 
 const clientSecretsPath = path.join(__dirname, 'client_secrets.json');
 let oauth2Client = null;
+let youtubeRedirectUri = '';
 
 function initYoutubeAuth() {
   let clientId = process.env.YOUTUBE_CLIENT_ID;
@@ -113,7 +114,8 @@ function initYoutubeAuth() {
   }
 
   try {
-    oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri || `http://localhost:${PORT}/api/auth/youtube/callback`);
+    youtubeRedirectUri = redirectUri || `http://localhost:${PORT}/api/auth/youtube/callback`;
+    oauth2Client = new google.auth.OAuth2(clientId, clientSecret, youtubeRedirectUri);
     // Load tokens from config.json (survives Railway deploys)
     if (config.youtube_tokens && config.youtube_tokens.access_token) {
       oauth2Client.setCredentials(config.youtube_tokens);
@@ -179,13 +181,19 @@ app.get('/health', (req, res) => {
 });
 
 app.get('/api/auth/youtube', (req, res) => {
-  if (!oauth2Client) return res.status(500).json({ error: 'YouTube client not initialized.' });
+  if (!oauth2Client) return res.status(500).send(`YouTube client not initialized. Set YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET env vars first.`);
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://www.googleapis.com/auth/youtube.upload'],
     prompt: 'consent'
   });
-  res.redirect(authUrl);
+  res.send(`<html><body>
+    <h3>YouTube Authorization</h3>
+    <p>Click below to authorize. Make sure this redirect URI:</p>
+    <pre>${youtubeRedirectUri}</pre>
+    <p>is listed in <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a> as an Authorized Redirect URI.</p>
+    <p><a href="${authUrl}">Continue to Google →</a></p>
+  </body></html>`);
 });
 
 app.get('/api/auth/youtube/callback', async (req, res) => {
@@ -195,9 +203,13 @@ app.get('/api/auth/youtube/callback', async (req, res) => {
     log(`YouTube OAuth denied: ${error}`);
     return res.send(`<html><body><h3>Authorization Denied</h3><p>Google returned: ${error}</p><p>Try again at <a href="/api/auth/youtube">/api/auth/youtube</a>.</p></body></html>`);
   }
+  if (!oauth2Client) {
+    log('YouTube OAuth callback hit but client not initialized.');
+    return res.status(500).send('YouTube client not initialized. Check YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET env vars.');
+  }
   if (!code) {
     log('YouTube OAuth callback missing authorization code. Query: ' + JSON.stringify(req.query));
-    return res.status(400).send(`Missing authorization code. Make sure the redirect URI (<code>${oauth2Client ? oauth2Client._redirectUri : 'unknown'}</code>) is listed in <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a>.`);
+    return res.status(400).send(`Missing authorization code. Make sure the redirect URI below matches what's in <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a>:<br><br><code>${youtubeRedirectUri}</code>`);
   }
   try {
     const { tokens } = await oauth2Client.getToken(code);
