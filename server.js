@@ -114,6 +114,9 @@ function initYoutubeAuth() {
   }
 
   try {
+    if (!redirectUri && process.env.RAILWAY_PUBLIC_DOMAIN) {
+      redirectUri = `https://${process.env.RAILWAY_PUBLIC_DOMAIN}/api/auth/youtube/callback`;
+    }
     youtubeRedirectUri = redirectUri || `http://localhost:${PORT}/api/auth/youtube/callback`;
     oauth2Client = new google.auth.OAuth2(clientId, clientSecret, youtubeRedirectUri);
     // Load tokens from config.json (survives Railway deploys)
