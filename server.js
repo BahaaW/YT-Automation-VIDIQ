@@ -15,6 +15,8 @@ import {
   callTool,
   parseKvArgs,
   getTrendingVideos,
+  rankVideos,
+  getOutliers,
   generateClips,
   pollJob,
   formatToolResult,
@@ -50,8 +52,14 @@ let config = {
   viral_feed: [],
   viral_picks: [],
   viral_summary_message_id: null,
-  vidiq_default_prompt: 'Highlight the most viral and engaging moments that work as standalone YouTube Shorts.',
-  viral_filters: {}
+  vidiq_default_prompt: 'Highlight the most viral and engaging moments that work as standalone YouTube Shorts. Add mirroring, hue shifting, zooming, and pitch shifting every 10-15 seconds so the video stays the same but looks slightly different. If the video doesn\'t have a human voice or sounds, don\'t use subtitles.',
+  viral_filters: {},
+  niche_override: null,
+  stop_requested: false,
+  schedule_passes: [],
+  clip_count: null,
+  video_stats: [],
+  pending_preview: null
 };
 
 function loadConfig() {
@@ -238,63 +246,78 @@ function startClippingPipeline(runEntry, url, prompt) {
 }
 
 async function runClippingPipeline(runEntry, url, prompt) {
+  if (config.stop_requested) { abortRun(runEntry); return; }
   log(`Submitting clipping job for URL: ${url}`);
-  try {
-    const r = await generateClips(url, prompt);
-    const data = r.data || {};
-    const mcpJobId = data.mcpJobId || data.jobId || (data.content && data.content[0] && JSON.parse(data.content[0].text).mcpJobId);
-    if (!mcpJobId) throw new Error(`No mcpJobId in generate_clips response: ${JSON.stringify(data).slice(0, 200)}`);
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const r = await generateClips(url, prompt);
+      const data = r.data || {};
+      const mcpJobId = data.mcpJobId || data.jobId || (data.content && data.content[0] && JSON.parse(data.content[0].text).mcpJobId);
+      if (!mcpJobId) throw new Error(`No mcpJobId in generate_clips response: ${JSON.stringify(data).slice(0, 200)}`);
 
-    runEntry.mcpJobId = mcpJobId;
-    saveConfig();
-    if (bot && config.telegram_chat_id) {
-      bot.telegram.sendMessage(config.telegram_chat_id, `⏳ VidIQ processing started. Job ID: \`${mcpJobId}\`. Polling for completion.`);
+      runEntry.mcpJobId = mcpJobId;
+      saveConfig();
+      if (bot && config.telegram_chat_id) {
+        bot.telegram.sendMessage(config.telegram_chat_id, `⏳ VidIQ processing started. Job ID: \`${mcpJobId}\`. Polling for completion.`);
+      }
+      pollVidIQJob(runEntry);
+      return;
+    } catch (e) {
+      lastErr = e;
+      log(`VidIQ submission attempt ${attempt} failed: ${e.message}`);
+      if (attempt < 3) await sleep(1000 * attempt);
     }
-    pollVidIQJob(runEntry);
-  } catch (e) {
-    log(`VidIQ submission failed: ${e.message}`);
-    failRun(runEntry, `VidIQ submission failed: ${e.message}`);
   }
+  failRun(runEntry, `VidIQ submission failed after 3 attempts: ${lastErr.message}`);
 }
 
 async function pollVidIQJob(runEntry) {
   let attempts = 0;
   const maxAttempts = 60;
   const interval = setInterval(async () => {
+    if (config.stop_requested) { clearInterval(interval); abortRun(runEntry); return; }
     attempts++;
     log(`Polling VidIQ job ${runEntry.mcpJobId} (attempt ${attempts}/${maxAttempts})…`);
-    try {
-      const r = await pollJob(runEntry.mcpJobId);
-      const job = r.data || {};
-      log(`Job status: ${job.status}`);
-      if (job.status === 'completed') {
-        clearInterval(interval);
-        log('VidIQ job completed.');
-        const clips = (job.result && job.result.clips) || job.clips || [];
-        if (!clips.length) {
-          failRun(runEntry, 'Job completed but returned 0 clips.');
-          return;
+    let pollingRetries = 0;
+    while (pollingRetries < 3) {
+      try {
+        const r = await pollJob(runEntry.mcpJobId);
+        const job = r.data || {};
+        log(`Job status: ${job.status}`);
+        if (job.status === 'completed') {
+          clearInterval(interval);
+          log('VidIQ job completed.');
+          const clips = (job.result && job.result.clips) || job.clips || [];
+          if (!clips.length) {
+            failRun(runEntry, 'Job completed but returned 0 clips.');
+            return;
+          }
+          runEntry.status = 'downloading';
+          runEntry.clips = clips.map((c, i) => ({
+            title: c.title || `Clip ${i + 1}`,
+            downloadUrl: c.downloadUrl || c.videoUrl || c.url,
+            status: 'pending'
+          }));
+          saveConfig();
+          if (bot && config.telegram_chat_id) {
+            await bot.telegram.sendMessage(config.telegram_chat_id, `✅ VidIQ produced ${clips.length} clips. Downloading and uploading…`);
+          }
+          processClipsAndUpload(runEntry);
+        } else if (job.status === 'failed' || job.status === 'expired') {
+          clearInterval(interval);
+          failRun(runEntry, `Job ${job.status}.`);
+        } else if (attempts >= maxAttempts) {
+          clearInterval(interval);
+          failRun(runEntry, 'Timed out after 30 minutes.');
         }
-        runEntry.status = 'downloading';
-        runEntry.clips = clips.map((c, i) => ({
-          title: c.title || `Clip ${i + 1}`,
-          downloadUrl: c.downloadUrl || c.videoUrl || c.url,
-          status: 'pending'
-        }));
-        saveConfig();
-        if (bot && config.telegram_chat_id) {
-          await bot.telegram.sendMessage(config.telegram_chat_id, `✅ VidIQ produced ${clips.length} clips. Downloading and uploading…`);
-        }
-        processClipsAndUpload(runEntry);
-      } else if (job.status === 'failed' || job.status === 'expired') {
-        clearInterval(interval);
-        failRun(runEntry, `Job ${job.status}.`);
-      } else if (attempts >= maxAttempts) {
-        clearInterval(interval);
-        failRun(runEntry, 'Timed out after 30 minutes.');
+        break;
+      } catch (e) {
+        pollingRetries++;
+        log(`Polling error (attempt ${pollingRetries}): ${e.message}`);
+        if (pollingRetries >= 3) break;
+        await sleep(1000 * pollingRetries);
       }
-    } catch (e) {
-      log(`Polling error: ${e.message}`);
     }
   }, 30000);
 }
@@ -307,36 +330,61 @@ async function processClipsAndUpload(runEntry) {
     }
     const tempDir = path.join(__dirname, 'temp', runEntry.id);
     fs.mkdirSync(tempDir, { recursive: true });
-    const clips = runEntry.clips.slice(0, 5);
+    const maxClips = config.clip_count || 5;
+    const clips = runEntry.clips.slice(0, maxClips);
     const youtube = google.youtube({ version: 'v3', auth: oauth2Client });
     const baseDate = new Date();
     baseDate.setMinutes(baseDate.getMinutes() + 10);
 
     for (let i = 0; i < clips.length; i++) {
+      if (config.stop_requested) { abortRun(runEntry, tempDir); return; }
       const clip = clips[i];
       clip.status = 'downloading';
       saveConfig();
       const filePath = path.join(tempDir, `clip_${i}.mp4`);
       const writer = fs.createWriteStream(filePath);
-      const res = await axios({ url: clip.downloadUrl, method: 'GET', responseType: 'stream' });
-      res.data.pipe(writer);
-      await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
+      let dlRetries = 0;
+      while (dlRetries < 3) {
+        try {
+          const res = await axios({ url: clip.downloadUrl, method: 'GET', responseType: 'stream' });
+          res.data.pipe(writer);
+          await new Promise((resolve, reject) => { writer.on('finish', resolve); writer.on('error', reject); });
+          break;
+        } catch (e) {
+          dlRetries++;
+          log(`Download attempt ${dlRetries} failed for clip ${i}: ${e.message}`);
+          if (dlRetries >= 3) throw e;
+          await sleep(1000 * dlRetries);
+        }
+      }
 
       clip.status = 'uploading';
       saveConfig();
       const publishAt = new Date(baseDate.getTime() + i * 3 * 60 * 60 * 1000).toISOString();
-      const up = await youtube.videos.insert({
-        part: 'snippet,status',
-        requestBody: {
-          snippet: {
-            title: `${clip.title.substring(0, 70)} #Shorts`,
-            description: `${clip.title}\n\nGenerated automatically via VidIQ.\n#Shorts #youtube #trending`,
-            categoryId: '22'
-          },
-          status: { privacyStatus: 'private', publishAt, selfDeclaredMadeForKids: false }
-        },
-        media: { body: fs.createReadStream(filePath) }
-      });
+      let upRetries = 0;
+      let up;
+      while (upRetries < 3) {
+        try {
+          up = await youtube.videos.insert({
+            part: 'snippet,status',
+            requestBody: {
+              snippet: {
+                title: `${clip.title.substring(0, 70)} #Shorts`,
+                description: `${clip.title}\n\nClip from: ${runEntry.sourceVideo?.title || clip.title}\nChannel: ${runEntry.sourceVideo?.channelTitle || 'Unknown'}\nOriginal: ${runEntry.sourceVideo?.url || ''}\n\n#Shorts #youtube #trending`,
+                categoryId: '22'
+              },
+              status: { privacyStatus: 'private', publishAt, selfDeclaredMadeForKids: false }
+            },
+            media: { body: fs.createReadStream(filePath) }
+          });
+          break;
+        } catch (e) {
+          upRetries++;
+          log(`Upload attempt ${upRetries} failed for clip ${i}: ${e.message}`);
+          if (upRetries >= 3) throw e;
+          await sleep(1000 * upRetries);
+        }
+      }
       clip.status = 'completed';
       clip.videoId = up.data.id;
       clip.scheduledAt = publishAt;
@@ -344,6 +392,16 @@ async function processClipsAndUpload(runEntry) {
       try { fs.unlinkSync(filePath); } catch (_) {}
     }
     try { fs.rmdirSync(tempDir); } catch (_) {}
+
+    config.video_stats.push({
+      videoId: runEntry.url,
+      clipCount: clips.length,
+      scheduledAt: new Date().toISOString(),
+      niche: config.niche_override || 'general',
+      sourceUrl: runEntry.url,
+      clips: clips.map(c => ({ title: c.title, videoId: c.videoId, scheduledAt: c.scheduledAt }))
+    });
+    saveConfig();
 
     runEntry.status = 'completed';
     config.state = 'idle';
@@ -378,9 +436,18 @@ setInterval(() => {
   if (t === config.daily_schedule_time && config.state === 'idle' && !config.automation_paused) {
     triggerDailyViralSearch();
   }
+  if (config.schedule_passes && config.state === 'idle' && !config.automation_paused) {
+    for (const pass of config.schedule_passes) {
+      if (t === pass.time) {
+        triggerDailyViralSearch(pass.niche || null, pass.clipCount || null);
+      }
+    }
+  }
 }, 60000);
 
-async function triggerDailyViralSearch() {
+let viral_display_offset = 0;
+
+async function triggerDailyViralSearch(nicheOverride, clipCountOverride) {
   if (!bot || !config.telegram_chat_id) {
     log('Daily viral skipped: no bot/chat.');
     return;
@@ -388,20 +455,26 @@ async function triggerDailyViralSearch() {
   config.state = 'fetching_viral';
   config.viral_feed = [];
   config.viral_picks = [];
+  viral_display_offset = 0;
+  config.niche_override = nicheOverride || config.niche_override;
+  config.clip_count = clipCountOverride !== null && clipCountOverride !== undefined ? clipCountOverride : config.clip_count;
   saveConfig();
-  log('Daily viral search triggered.');
+  log('Daily viral search triggered.' + (config.niche_override ? ` (niche: ${config.niche_override})` : ''));
   try {
-    const feed = await getTrendingVideos(config.viral_filters || {});
-    if (!feed || feed.length < 2) {
+    const filters = { ...(config.viral_filters || {}) };
+    if (config.niche_override) filters.keyword = config.niche_override;
+    const raw = await getTrendingVideos(filters);
+    if (!raw || raw.length < 2) {
       config.state = 'idle';
       saveConfig();
       await bot.telegram.sendMessage(config.telegram_chat_id, '⚠️ VidIQ returned too few trending videos. Skipping.');
       return;
     }
+    const feed = rankVideos(raw);
     config.viral_feed = feed;
     config.state = 'waiting_for_viral_pick';
     saveConfig();
-    await sendViralPicker(feed);
+    await sendViralPicker(feed, 0);
   } catch (e) {
     log(`Daily viral failed: ${e.message}`);
     config.state = 'idle';
@@ -420,8 +493,10 @@ function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-async function sendViralPicker(feed) {
-  for (const video of feed) {
+async function sendViralPicker(feed, startIndex = 0) {
+  const batch = feed.slice(startIndex, startIndex + 5);
+  const total = feed.length;
+  for (const video of batch) {
     const stats = video.viewCount != null ? ` • ${Number(video.viewCount).toLocaleString()} views` : '';
     const caption = `*${video.index + 1}.* ${escapeMarkdown(video.title)}\n_${escapeMarkdown(video.channelTitle)}_${stats}\n${video.url}`;
     try {
@@ -437,8 +512,9 @@ async function sendViralPicker(feed) {
     }
     saveConfig();
   }
+  const end = Math.min(startIndex + 5, total);
   const summary = await bot.telegram.sendMessage(config.telegram_chat_id,
-    '🎬 *Pick 2 of 5*\n\nReply `.` to any video above to pick it. After 2 picks, the pipeline starts automatically.',
+    `🎬 *Pick 2 of ${total}* (showing ${startIndex + 1}-${end})\n\nReply \`.\` to any video above to pick it. After 2 picks, the pipeline starts automatically.\nUse \`/donnie refresh\` for the next batch.`,
     { parse_mode: 'Markdown' });
   config.viral_summary_message_id = summary.message_id;
   saveConfig();
@@ -458,17 +534,26 @@ function handleViralReplyPick(ctx, repliedToMessageId) {
   saveConfig();
   ctx.reply(`✓ Picked #${match.index + 1} — ${escapeMarkdown(match.title)} (${config.viral_picks.length}/2).`);
   if (config.viral_summary_message_id) {
+    const total = (config.viral_feed || []).length;
     const next = config.viral_picks.length === 2
-      ? `🎬 *Pick 2 of 5*\n\n✓ 2/2 picked. Starting pipeline…`
-      : `🎬 *Pick 2 of 5*\n\n✓ 1/2 picked. Reply \`.\` to another video.`;
+      ? `🎬 *Pick 2 of ${total}*\n\n✓ 2/2 picked. Reply \`y\` to approve or \`n\` to cancel.`
+      : `🎬 *Pick 2 of ${total}*\n\n✓ 1/2 picked. Reply \`.\` to another video, or use \`/donnie refresh\` for the next batch.`;
     bot.telegram.editMessageText(config.telegram_chat_id, config.viral_summary_message_id, null, next, { parse_mode: 'Markdown' }).catch(() => {});
   }
   if (config.viral_picks.length === 2) {
-    runViralPicks().catch((e) => {
-      log(`runViralPicks crashed: ${e.message}`);
-      config.state = 'idle';
-      saveConfig();
+    config.pending_preview = {
+      picks: [...config.viral_picks],
+      feed: [...(config.viral_feed || [])]
+    };
+    saveConfig();
+    const previewLines = config.viral_picks.map(idx => {
+      const v = config.viral_feed[idx];
+      return `  ${idx + 1}. ${v.title}`;
     });
+    ctx.reply(
+      `📋 *Preview — 2 picks ready:*\n${previewLines.join('\n')}\n\nReply \`y\` to approve and start, or \`n\` to cancel.`,
+      { parse_mode: 'Markdown' }
+    );
   }
 }
 
@@ -490,7 +575,8 @@ async function runViralPicks() {
       source: 'viral_pick',
       prompt: config.vidiq_default_prompt,
       status: 'processing',
-      clips: []
+      clips: [],
+      sourceVideo: { title: video.title, channelTitle: video.channelTitle, url: video.url, viewCount: video.viewCount }
     };
     config.history.unshift(runEntry);
     saveConfig();
@@ -593,7 +679,13 @@ function initTelegramBot() {
         '/donnie channel `<@handle or UCid>` — Channel stats.\n' +
         '/donnie similar `<niche>` — Similar channels.\n' +
         '/donnie transcript `<videoId>` — Get a video transcript.\n' +
-        '/donnie jobs — List your VidIQ jobs.\n\n' +
+        '/donnie jobs — List your VidIQ jobs.\n' +
+        '/donnie schedule `HH:MM` — Set daily schedule time.\n' +
+        '/donnie niche `<niche>` — Set niche override (keyword for trending).\n' +
+        '/donnie stop — Stop the current run.\n' +
+        '/donnie clipcount `<N>` — Max clips per video.\n' +
+        '/donnie passes `<time1> [<time2> ...]` — Extra trending passes.\n' +
+        '/donnie stats — Show performance stats.\n\n' +
         `Daily schedule: ${config.daily_schedule_time}.\n` +
         'After /donnie sends 5 video photos, reply `.` to 2 of them to pick. The pipeline auto-starts after 2 picks.',
         { parse_mode: 'Markdown' }
@@ -607,6 +699,9 @@ function initTelegramBot() {
         `*Last run:* ${config.last_run || 'never'}`,
         `*YouTube auth:* ${hasYoutubeAuth() ? 'yes' : 'no'}`,
         `*Daily schedule:* ${config.daily_schedule_time}`,
+        `*Niche override:* ${config.niche_override || '(none)'}`,
+        `*Clip count:* ${config.clip_count || 5}`,
+        `*Schedule passes:* ${(config.schedule_passes || []).map(p => p.time).join(', ') || '(none)'}`,
         `*Default prompt:* ${escapeMarkdown(config.vidiq_default_prompt || '(default)')}`,
         `*Viral filters:* ${Object.keys(config.viral_filters || {}).length ? '\\`' + JSON.stringify(config.viral_filters) + '\\`' : '(none)'}`,
         `*VidIQ tools loaded:* ${toolCount()}`,
@@ -644,6 +739,19 @@ function initTelegramBot() {
           handleViralReplyPick(ctx, replyTo.message_id);
         } else if (text === '.') {
           ctx.reply('Reply `.` to one of the 5 video messages above, not as a new message.');
+        } else if (config.pending_preview && (text.toLowerCase() === 'y' || text.toLowerCase() === 'yes')) {
+          config.pending_preview = null;
+          saveConfig();
+          runViralPicks().catch((e) => {
+            log(`runViralPicks crashed: ${e.message}`);
+            config.state = 'idle';
+            saveConfig();
+          });
+        } else if (config.pending_preview && (text.toLowerCase() === 'n' || text.toLowerCase() === 'no')) {
+          config.viral_picks = [];
+          config.pending_preview = null;
+          saveConfig();
+          ctx.reply('✖ Cancelled. You can pick again or type /donnie for a fresh feed.');
         } else {
           ctx.reply('Pick 2 of the 5 viral videos by replying `.` to them. Type /help for the full command list.');
         }
@@ -680,10 +788,17 @@ async function handleDonnieCommand(ctx) {
   if (sub === 'transcript') return callAndShow(ctx, 'vidiq_video_transcript', { videoId: parts[1] });
   if (sub === 'pause') return pauseAutomation(ctx);
   if (sub === 'resume') return resumeAutomation(ctx);
+  if (sub === 'schedule') return setDonnieSchedule(ctx, parts.slice(1));
+  if (sub === 'niche') return setDonnieNiche(ctx, parts.slice(1));
+  if (sub === 'stop') return stopCurrentRun(ctx);
+  if (sub === 'clipcount') return setDonnieClipCount(ctx, parts.slice(1));
+  if (sub === 'passes') return setDonniePasses(ctx, parts.slice(1));
+  if (sub === 'stats') return getDonnieStats(ctx);
+  if (sub === 'refresh') return refreshViralFeed(ctx);
 
   return ctx.reply(
     'Unknown /donnie subcommand.\n\n' +
-    'Try /donnie, /donnie pause, /donnie resume, /donnie prompt, /donnie video filter, /donnie filters, /donnie tools, /donnie tool `<name>`, /donnie balance, /donnie jobs, or one of the shortcuts (trending, outliers, keyword, channel, similar, transcript). Type /help for the full list.'
+    'Try /donnie, /donnie pause, /donnie resume, /donnie schedule, /donnie niche, /donnie stop, /donnie clipcount, /donnie passes, /donnie stats, /donnie refresh, /donnie prompt, /donnie video filter, /donnie filters, /donnie tools, /donnie tool `<name>`, /donnie balance, /donnie jobs, or one of the shortcuts (trending, outliers, keyword, channel, similar, transcript). Type /help for the full list.'
   );
 }
 
@@ -711,6 +826,26 @@ async function triggerDonnieNow(ctx) {
   if (config.state !== 'idle') return ctx.reply(`Cannot run now. State: \`${config.state}\`. Wait for current run.`, { parse_mode: 'Markdown' });
   await ctx.reply('🔥 Triggering viral run…');
   triggerDailyViralSearch();
+}
+
+async function refreshViralFeed(ctx) {
+  const feed = config.viral_feed || [];
+  if (feed.length && viral_display_offset + 5 < feed.length) {
+    viral_display_offset += 5;
+    config.viral_summary_message_id = null;
+    saveConfig();
+    await ctx.reply(`🔄 Showing next batch (videos ${viral_display_offset + 1}-${Math.min(viral_display_offset + 5, feed.length)} of ${feed.length}).`);
+    await sendViralPicker(feed, viral_display_offset);
+  } else {
+    config.viral_feed = [];
+    config.viral_picks = [];
+    config.pending_preview = null;
+    config.viral_summary_message_id = null;
+    viral_display_offset = 0;
+    saveConfig();
+    await ctx.reply('🔄 No more batches. Fetching fresh feed…');
+    triggerDailyViralSearch();
+  }
 }
 
 function setDonniePrompt(ctx, prompt) {
@@ -799,6 +934,84 @@ async function handleChannelShortcut(ctx, args) {
   const kv = {};
   try { Object.assign(kv, parseKvArgs(args.slice(1))); } catch (_) {}
   return callAndShow(ctx, 'vidiq_channel_stats', { channelId: id, ...kv });
+}
+
+// === New feature functions ===
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
+}
+
+function setDonnieSchedule(ctx, args) {
+  const time = (args || []).join('').trim();
+  if (!time || !/^\d{2}:\d{2}$/.test(time)) return ctx.reply('Usage: /donnie schedule `HH:MM` (24h format).');
+  config.daily_schedule_time = time;
+  saveConfig();
+  ctx.reply(`✓ Daily schedule set to ${time}.`);
+}
+
+function setDonnieNiche(ctx, args) {
+  const niche = (args || []).join(' ').trim();
+  config.niche_override = niche || null;
+  saveConfig();
+  ctx.reply(niche ? `✓ Niche override set to "${niche}".` : '✓ Niche override cleared. Trending will use default filters.');
+}
+
+async function stopCurrentRun(ctx) {
+  config.stop_requested = true;
+  saveConfig();
+  const run = (config.history || []).find(e => e.status === 'processing');
+  if (run) {
+    failRun(run, 'Manually stopped by user');
+  } else {
+    config.state = 'idle';
+    saveConfig();
+  }
+  ctx.reply('⏹ Stop requested. The current run will abort at the next check point.');
+}
+
+function setDonnieClipCount(ctx, args) {
+  const n = parseInt((args || [])[0], 10);
+  if (isNaN(n) || n < 1 || n > 20) return ctx.reply('Usage: /donnie clipcount `<1-20>`.');
+  config.clip_count = n;
+  saveConfig();
+  ctx.reply(`✓ Max clips per video set to ${n}.`);
+}
+
+function setDonniePasses(ctx, args) {
+  const times = (args || []).join(' ').trim().split(/\s+/).filter(Boolean);
+  if (!times.length) return ctx.reply('Usage: /donnie passes `<HH:MM> [<HH:MM> ...]`.\nExample: /donnie passes 14:00 20:00');
+  for (const t of times) {
+    if (!/^\d{2}:\d{2}$/.test(t)) return ctx.reply(`Invalid time: "${t}". Use HH:MM format.`);
+  }
+  config.schedule_passes = times.map(t => ({ time: t }));
+  saveConfig();
+  ctx.reply(`✓ Schedule passes set: ${times.join(', ')}.`);
+}
+
+function getDonnieStats(ctx) {
+  const stats = config.video_stats || [];
+  if (!stats.length) return ctx.reply('No stats yet. Runs will be tracked after each completion.');
+
+  const ok = stats.filter(s => s.videoId);
+  const totalClips = ok.reduce((sum, s) => sum + (s.clipCount || 0), 0);
+  const niches = [...new Set(ok.map(s => s.niche).filter(Boolean))];
+
+  const lines = [
+    `*Donnie Stats*`,
+    `Total runs: ${stats.length}`,
+    `Successful: ${ok.length}`,
+    `Total clips generated: ${totalClips}`,
+    `Niches used: ${niches.join(', ') || '(default)'}`,
+    ``,
+    `*Last 5 runs:*`
+  ];
+
+  for (const s of stats.slice(-5).reverse()) {
+    lines.push(`  ${s.scheduledAt?.substring(0, 10) || '?'} — ${s.niche || 'default'} — ${s.clipCount || 0} clips${s.videoId ? ' ✓' : ' ✗'}`);
+  }
+
+  ctx.reply(lines.join('\n'), { parse_mode: 'Markdown' });
 }
 
 initTelegramBot();

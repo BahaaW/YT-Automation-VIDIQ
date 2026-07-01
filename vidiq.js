@@ -154,10 +154,11 @@ export async function callTool(name, args) {
 // === Specific tool wrappers (used by the viral picker and explicit commands) ===
 
 export async function getTrendingVideos(filters = {}) {
-  const args = { videoFormat: 'long', limit: 5, ...filters };
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  const args = { videoFormat: 'short', limit: 10, viewCountMin: 1000000, videoPublishedAfter: sevenDaysAgo, ...filters };
   const r = await callTool('vidiq_trending_videos', args);
   const videos = (r.data && r.data.videos) || [];
-  return videos.slice(0, 5).map((v, i) => ({
+  return videos.map((v, i) => ({
     index: i,
     videoId: v.videoId,
     url: `https://www.youtube.com/watch?v=${v.videoId}`,
@@ -173,6 +174,18 @@ export async function getTrendingVideos(filters = {}) {
     tags: v.videoTags || [],
     thumbnail: `https://i.ytimg.com/vi/${v.videoId}/hqdefault.jpg`
   })).filter(v => v.videoId);
+}
+
+export function rankVideos(videos) {
+  if (!videos.length) return videos;
+  const min = (arr, k) => Math.min(...arr.map(v => v[k] != null ? v[k] : 0));
+  const max = (arr, k) => Math.max(...arr.map(v => v[k] != null ? v[k] : 0));
+  const norm = (v, k) => { const mn = min(videos, k), mx = max(videos, k); return mx - mn === 0 ? 0.5 : (v[k] - mn) / (mx - mn); };
+  const scored = videos.map(v => ({
+    ...v, _score: norm(v, 'vph') * 0.4 + norm(v, 'engagementRate') * 0.4 + norm(v, 'viewCount') * 0.2
+  }));
+  scored.sort((a, b) => b._score - a._score);
+  return scored.map((v, i) => { const { _score, ...rest } = v; return { ...rest, index: i }; });
 }
 
 export async function getOutliers(filters = {}) {

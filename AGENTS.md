@@ -8,12 +8,14 @@
 * **YouTube upload**: `googleapis` (OAuth) to schedule generated clips to YouTube Shorts.
 
 ## Daily Flow
-* At `daily_schedule_time` (default 09:00) the bot calls `vidiq_trending_videos` on the VidIQ MCP (filtered by `viral_filters`), sends the top 5 videos to Telegram as individual photo messages (thumbnail + caption + URL), then a summary "Pick 2 of 5" message.
-* The user replies `.` to any 2 of the 5 video messages. Picks are matched by replied-to `message_id`. After 2 picks the pipeline auto-starts: each video generates 5 clips and schedules them to YouTube Shorts (3h apart) — 10 Shorts per day total.
+* At `daily_schedule_time` (default 09:00) the bot calls `vidiq_trending_videos` on the VidIQ MCP (filtered by `viral_filters`), sends the top 5 videos to Telegram as individual photo messages (thumbnail + caption + URL), then a summary "Pick 2 of 5" message. Extra passes in `schedule_passes` array also trigger runs at their times.
+* The user replies `.` to any 2 of the 5 video messages. Picks are matched by replied-to `message_id`. After 2 picks the bot shows a preview with the two selected videos and asks for approval (`y`/`n`). On `y` the pipeline auto-starts: each video generates clips (max `clip_count`) and schedules them to YouTube Shorts (3h apart).
+* Pipeline retries: `generateClips`, `pollJob`, per-clip download, and per-clip upload each retry up to 3 times with exponential backoff (`1000 * attempt` ms).
+* Stop mechanism: set `stop_requested: true` in config. Checked before each major pipeline stage. On next check the pipeline aborts abruptly via `failRun()`.
 
 ## Commands
 * `/start` — Register the chat.
-* `/status` — State, last run, YouTube auth, default prompt, viral filters, tool count, history size.
+* `/status` — State, last run, YouTube auth, niche override, clip count, schedule passes, default prompt, viral filters, tool count, history size.
 * `/help` — Full command list.
 * `/clip <url> | <prompt>` — Manual escape hatch.
 * `/donnie` (no args) — Trigger today's viral run now.
@@ -24,11 +26,23 @@
 * `/donnie tool <name> help` — Show a tool's required/optional params.
 * `/donnie balance` — Check credits.
 * `/donnie jobs` — List VidIQ jobs.
+* `/donnie schedule HH:MM` — Set the daily schedule time.
+* `/donnie niche <text>` — Override trending search niche. Omit text to clear.
+* `/donnie stop` — Request abort of the current run at next check point.
+* `/donnie clipcount <1-20>` — Set max clips per video.
+* `/donnie passes HH:MM [HH:MM ...]` — Set extra schedule passes for additional daily runs.
+* `/donnie stats` — Show performance stats: total runs, clips, niches used.
 * Shortcuts: `/donnie trending [short|long]`, `/donnie outliers <keyword>`, `/donnie keyword <seed>`, `/donnie channel <@handle|UCid>`, `/donnie similar <niche>`, `/donnie transcript <videoId>`.
 
 ## Picking Videos
 * After `/donnie` (or the 09:00 cron) sends 5 photo messages, the user picks 2 by replying `.` to two of them. No buttons — reply-with-dot only.
-* The summary message above is edited in place: `✓ 1/2 picked...` → `✓ 2/2 picked. Starting pipeline...`.
+* After 2 picks, a preview message shows the titles and asks for `y`/`n` approval before starting the pipeline. `y` runs it, `n` clears picks. The summary message is edited in place: `✓ 1/2 picked...` → `✓ 2/2 picked. Starting pipeline...`.
+
+## Retry & Error Handling
+* All network-sensitive operations (clip generation, job polling, clip download, upload) use a 3-attempt for-loop with `sleep(1000 * attempt)` ms backoff.
+* `stop_requested` flag is checked at coarse boundaries (start of each major pipeline stage) to keep response fast.
+* Video stats (`video_stats[]`) records each run's result: `{videoId, clipCount, scheduledAt, niche, sourceUrl, clips: [...]}`.
+* `pending_preview` stores picks while waiting for user approval; cleared on `y` or `n`.
 
 ## Local Execution
 * Start command: `npm start` or `npm run dev`.
@@ -36,6 +50,7 @@
 
 ## Configurations
 * Settings are saved to `config.json` in the project root (telegram token, chat ID, daily schedule, viral feed, picks, default prompt, viral filters).
+* New config fields: `niche_override`, `stop_requested`, `schedule_passes[]`, `clip_count` (default 5), `video_stats[]`, `pending_preview`.
 * OAuth tokens are saved to `oauth_token.json`.
 * `.env` holds the live secrets: `TELEGRAM_TOKEN`, `VIDIQ_TOKEN`, `YOUTUBE_CLIENT_ID`, `YOUTUBE_CLIENT_SECRET`, `YOUTUBE_REDIRECT_URI`. All gitignored.
 * `vidiq_tools.json` is committed so others don't need to re-discover. To regenerate: run a one-off Node script that connects to the MCP via `StreamableHTTPClientTransport` and calls `client.listTools()`.
