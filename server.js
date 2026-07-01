@@ -44,6 +44,7 @@ let config = {
   telegram_chat_id: '',
   daily_schedule_time: '09:00',
   state: 'idle',
+  automation_paused: false,
   history: [],
   logs: [],
   viral_feed: [],
@@ -374,7 +375,7 @@ function failRun(runEntry, reason) {
 setInterval(() => {
   const now = new Date();
   const t = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-  if (t === config.daily_schedule_time && config.state === 'idle') {
+  if (t === config.daily_schedule_time && config.state === 'idle' && !config.automation_paused) {
     triggerDailyViralSearch();
   }
 }, 60000);
@@ -575,6 +576,8 @@ function initTelegramBot() {
         '/clip `<url> | <prompt>` — Manual clip run on a specific video.\n\n' +
         '*Donnie (viral + VidIQ MCP)*\n' +
         '/donnie — Trigger today\'s viral run (5 trending → pick 2 → clip).\n' +
+        '/donnie pause — Pause the daily automation cron.\n' +
+        '/donnie resume — Resume the daily automation cron.\n' +
         '/donnie prompt `<text>` — Set the default clip-generation prompt.\n' +
         '/donnie video filter `k=v` — Set viral-search filters (videoFormat, channelCountry, vphMin, etc.).\n' +
         '/donnie filters — Show current viral filters.\n' +
@@ -600,6 +603,7 @@ function initTelegramBot() {
     bot.command('status', (ctx) => {
       const lines = [
         `*State:* \`${config.state}\``,
+        `*Automation:* ${config.automation_paused ? '⏸ paused' : '▶ running'}`,
         `*Last run:* ${config.last_run || 'never'}`,
         `*YouTube auth:* ${hasYoutubeAuth() ? 'yes' : 'no'}`,
         `*Daily schedule:* ${config.daily_schedule_time}`,
@@ -674,11 +678,29 @@ async function handleDonnieCommand(ctx) {
   if (sub === 'channel') return handleChannelShortcut(ctx, parts.slice(1));
   if (sub === 'similar') return callAndShow(ctx, 'vidiq_similar_channels', { niche: parts.slice(1).join(' ') });
   if (sub === 'transcript') return callAndShow(ctx, 'vidiq_video_transcript', { videoId: parts[1] });
+  if (sub === 'pause') return pauseAutomation(ctx);
+  if (sub === 'resume') return resumeAutomation(ctx);
 
   return ctx.reply(
     'Unknown /donnie subcommand.\n\n' +
-    'Try /donnie, /donnie prompt, /donnie video filter, /donnie filters, /donnie tools, /donnie tool `<name>`, /donnie balance, /donnie jobs, or one of the shortcuts (trending, outliers, keyword, channel, similar, transcript). Type /help for the full list.'
+    'Try /donnie, /donnie pause, /donnie resume, /donnie prompt, /donnie video filter, /donnie filters, /donnie tools, /donnie tool `<name>`, /donnie balance, /donnie jobs, or one of the shortcuts (trending, outliers, keyword, channel, similar, transcript). Type /help for the full list.'
   );
+}
+
+async function pauseAutomation(ctx) {
+  if (config.automation_paused) return ctx.reply('⏸ Already paused.');
+  config.automation_paused = true;
+  saveConfig();
+  log('Automation paused by user.');
+  ctx.reply('⏸ Automation paused. Daily cron will not trigger. Use `/donnie resume` to re-enable.', { parse_mode: 'Markdown' });
+}
+
+async function resumeAutomation(ctx) {
+  if (!config.automation_paused) return ctx.reply('▶ Already running.');
+  config.automation_paused = false;
+  saveConfig();
+  log('Automation resumed by user.');
+  ctx.reply('▶ Automation resumed. Daily cron will fire at the next scheduled time.');
 }
 
 async function triggerDonnieNow(ctx) {
