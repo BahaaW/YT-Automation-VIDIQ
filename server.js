@@ -30,6 +30,7 @@ const __dirname = path.dirname(__filename);
 
 const PORT = process.env.PORT || 8080;
 const app = express();
+app.set('trust proxy', true);
 app.use(express.json());
 
 try {
@@ -194,6 +195,15 @@ app.get('/health', (req, res) => {
 
 app.get('/api/auth/youtube', (req, res) => {
   if (!oauth2Client) return res.status(500).send(`YouTube client not initialized. Set YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET env vars first.`);
+  
+  // Dynamically set redirect URI based on the request host/protocol if not explicitly overridden in environment
+  if (!process.env.YOUTUBE_REDIRECT_URI) {
+    const proto = req.protocol;
+    const host = req.get('host');
+    youtubeRedirectUri = `${proto}://${host}/api/auth/youtube/callback`;
+    oauth2Client.redirectUri = youtubeRedirectUri;
+  }
+
   const authUrl = oauth2Client.generateAuthUrl({
     access_type: 'offline',
     scope: ['https://www.googleapis.com/auth/youtube.upload'],
@@ -219,6 +229,15 @@ app.get('/api/auth/youtube/callback', async (req, res) => {
     log('YouTube OAuth callback hit but client not initialized.');
     return res.status(500).send('YouTube client not initialized. Check YOUTUBE_CLIENT_ID and YOUTUBE_CLIENT_SECRET env vars.');
   }
+
+  // Dynamically set redirect URI based on the request host/protocol if not explicitly overridden in environment
+  if (!process.env.YOUTUBE_REDIRECT_URI) {
+    const proto = req.protocol;
+    const host = req.get('host');
+    youtubeRedirectUri = `${proto}://${host}/api/auth/youtube/callback`;
+    oauth2Client.redirectUri = youtubeRedirectUri;
+  }
+
   if (!code) {
     log('YouTube OAuth callback missing authorization code. Query: ' + JSON.stringify(req.query));
     return res.status(400).send(`Missing authorization code. Make sure the redirect URI below matches what's in <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a>:<br><br><code>${youtubeRedirectUri}</code>`);

@@ -1,17 +1,11 @@
 # Project Primer - VidIQ Telegram Bot
-
-## Status
 * Deployed on Railway; auto-deploys from GitHub on push.
-* All 44 VidIQ MCP tools loaded via `vidiq_tools.json`.
-* Viral picker fully built: batches of 5 ranked shorts, refresh pagination, pick-2 pipeline with preview/approval.
-* `vidiq.js`: `getTrendingVideos()` defaults to shorts (limit 10, 1M+ views, 7 days). `rankVideos()` added with min-max normalization (vph×0.4 + engagementRate×0.4 + viewCount×0.2).
-* `server.js`: all viral picker changes done — `sendViralPicker()` accepts `startIndex`, `refreshViralFeed()` paginates offset, picks survive across batches, summary shows batch range.
-* Health check at `<railway-url>/health` — expect `{"telegram":true,"vidiq_tools":44}`.
+* Express app has trust proxy enabled and dynamically constructs redirect URI.
+* Dynamic redirect URI prevents OAuth redirect mismatches caused by dynamic ports or deployment domains.
 
 ## Next Steps
-1. Test viral feed refresh: `/donnie run` then `/donnie refresh` — verify batch 2 shows without clearing picks.
-2. Verify `rankVideos` scoring in logs.
-3. YouTube OAuth: update redirect URIs and authorize.
+1. Add `https://<railway-domain>/api/auth/youtube/callback` and `http://localhost:8080/api/auth/youtube/callback` to Google Console's Authorized Redirect URIs.
+2. Visit `/api/auth/youtube` on the running instance to authorize.
 
 ## Blockers
-* YouTube OAuth not yet authorized for Railway deployment.
+* None (ensure correct test user email is added in Google Console under OAuth Consent Screen).
