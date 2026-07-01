@@ -1,10 +1,10 @@
 # Project Primer - VidIQ Telegram Bot
 * Deployed on Railway; auto-deploys from GitHub on push.
 * Express app has trust proxy enabled and dynamically constructs redirect URI.
-* Dynamic redirect URI prevents OAuth redirect mismatches caused by dynamic ports or deployment domains.
+* Disabled keepAlive on Google auth transporter to resolve the "Premature close" socket error.
 
 ## Next Steps
-1. Add `https://<railway-domain>/api/auth/youtube/callback` and `http://localhost:8080/api/auth/youtube/callback` to Google Console's Authorized Redirect URIs.
+1. Add callback URIs (`https://<domain>/api/auth/youtube/callback`) to Google Console.
 2. Visit `/api/auth/youtube` on the running instance to authorize.
 
 ## Blockers

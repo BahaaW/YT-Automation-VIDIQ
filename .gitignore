@@ -3,4 +3,8 @@ config.json
 oauth_token.json
 .env
 client_secrets.json
+temp/
+test_*.js
+*.log
+.DS_Store
 

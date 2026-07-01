@@ -6,6 +6,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
+import https from 'https';
+import http from 'http';
 
 import {
   loadToolRegistry,
@@ -129,6 +131,16 @@ function initYoutubeAuth() {
     }
     youtubeRedirectUri = redirectUri || `http://localhost:${PORT}/api/auth/youtube/callback`;
     oauth2Client = new google.auth.OAuth2(clientId, clientSecret, youtubeRedirectUri);
+
+    // Disable keepAlive on the transporter to avoid the "Premature close" socket reuse issue in Node.js
+    const httpsAgent = new https.Agent({ keepAlive: false });
+    const httpAgent = new http.Agent({ keepAlive: false });
+    oauth2Client.transporter.defaults = {
+      ...(oauth2Client.transporter.defaults || {}),
+      httpsAgent,
+      httpAgent
+    };
+
     // Load tokens from config.json (survives Railway deploys)
     if (config.youtube_tokens && config.youtube_tokens.access_token) {
       oauth2Client.setCredentials(config.youtube_tokens);
