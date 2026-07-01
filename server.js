@@ -185,12 +185,20 @@ app.get('/api/auth/youtube', (req, res) => {
     scope: ['https://www.googleapis.com/auth/youtube.upload'],
     prompt: 'consent'
   });
-  res.json({ url: authUrl });
+  res.redirect(authUrl);
 });
 
 app.get('/api/auth/youtube/callback', async (req, res) => {
   const code = req.query.code;
-  if (!code) return res.status(400).send('Missing authorization code.');
+  const error = req.query.error;
+  if (error) {
+    log(`YouTube OAuth denied: ${error}`);
+    return res.send(`<html><body><h3>Authorization Denied</h3><p>Google returned: ${error}</p><p>Try again at <a href="/api/auth/youtube">/api/auth/youtube</a>.</p></body></html>`);
+  }
+  if (!code) {
+    log('YouTube OAuth callback missing authorization code. Query: ' + JSON.stringify(req.query));
+    return res.status(400).send(`Missing authorization code. Make sure the redirect URI (<code>${oauth2Client ? oauth2Client._redirectUri : 'unknown'}</code>) is listed in <a href="https://console.cloud.google.com/apis/credentials">Google Cloud Console</a>.`);
+  }
   try {
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
