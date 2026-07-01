@@ -130,6 +130,54 @@ function hasYoutubeAuth() {
   return oauth2Client && oauth2Client.credentials && oauth2Client.credentials.access_token !== undefined;
 }
 
+app.get('/', (req, res) => {
+  res.set('Content-Type', 'text/html; charset=utf-8');
+  const telegramOnline = !!config.telegram_token;
+  const ytAuth = hasYoutubeAuth();
+  const tools = toolCount();
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>VidIQ Telegram Bot</title>
+<style>
+body{font-family:system-ui,sans-serif;max-width:680px;margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.5}
+h1{margin:0 0 8px}
+.muted{color:#666;font-size:14px}
+.card{border:1px solid #e5e5e5;border-radius:8px;padding:16px;margin:16px 0}
+.row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #f0f0f0}
+.row:last-child{border:0}
+.ok{color:#0a7d27;font-weight:600}
+.no{color:#b00020;font-weight:600}
+code{background:#f5f5f5;padding:2px 6px;border-radius:4px;font-size:13px}
+</style></head><body>
+<h1>VidIQ Telegram Bot</h1>
+<p class="muted">This service is a Telegram bot backend, not a website. It has no UI. Interact with it through Telegram.</p>
+
+<div class="card">
+  <div class="row"><span>Telegram bot</span><span class="${telegramOnline ? 'ok' : 'no'}">${telegramOnline ? 'online' : 'OFFLINE (no TELEGRAM_TOKEN)'}</span></div>
+  <div class="row"><span>YouTube auth</span><span class="${ytAuth ? 'ok' : 'no'}">${ytAuth ? 'authorized' : 'needs /api/auth/youtube'}</span></div>
+  <div class="row"><span>VidIQ MCP tools</span><span class="ok">${tools} loaded</span></div>
+  <div class="row"><span>Daily schedule</span><span>${escapeHtml(config.daily_schedule_time)}</span></div>
+  <div class="row"><span>Registered chat</span><span>${escapeHtml(config.telegram_chat_id || '(none — send /start to the bot)')}</span></div>
+</div>
+
+<div class="card">
+  <div class="row"><span><code>GET /health</span><span>JSON status</code></span></div>
+  <div class="row"><span><code>GET /api/auth/youtube</code></span><span>start YouTube OAuth</span></div>
+  <div class="row"><span><code>GET /api/auth/youtube/callback?code=…</code></span><span>OAuth redirect target</span></div>
+</div>
+</body></html>`);
+});
+
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    telegram: !!config.telegram_token,
+    youtube: hasYoutubeAuth(),
+    vidiq_tools: toolCount(),
+    state: config.state,
+    chat_id: config.telegram_chat_id || null,
+    uptime_sec: Math.round(process.uptime())
+  });
+});
+
 app.get('/api/auth/youtube', (req, res) => {
   if (!oauth2Client) return res.status(500).json({ error: 'YouTube client not initialized.' });
   const authUrl = oauth2Client.generateAuthUrl({
@@ -341,6 +389,10 @@ async function triggerDailyViralSearch() {
 
 function escapeMarkdown(s) {
   return String(s).replace(/[_*`\[\]()~>#+\-=|{}.!\\]/g, '\\$&');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
 async function sendViralPicker(feed) {
