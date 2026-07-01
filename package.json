@@ -1,7 +1,7 @@
 {
   "name": "vidiq-telegram-bot",
   "version": "1.0.0",
-  "description": "Daily Telegram-to-VidIQ-to-YouTube Shorts automation pipeline with web dashboard.",
+  "description": "Telegram bot that drives the VidIQ MCP to find viral videos, pick 2 of 5, and schedule generated clips to YouTube Shorts.",
   "main": "server.js",
   "type": "module",
   "scripts": {
