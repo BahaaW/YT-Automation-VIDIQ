@@ -8,6 +8,19 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import https from 'https';
 import http from 'http';
+import { setGlobalDispatcher, Agent } from 'undici';
+
+// Configure global undici dispatcher with disabled keep-alive
+// This prevents connection reset (Premature close) issues in Node's native fetch
+try {
+  const undiciAgent = new Agent({
+    keepAliveTimeout: 1,
+    keepAliveMaxTimeout: 1
+  });
+  setGlobalDispatcher(undiciAgent);
+} catch (err) {
+  console.error('[startup] Failed to set global undici dispatcher:', err.message);
+}
 
 import {
   loadToolRegistry,

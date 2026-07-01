@@ -1,7 +1,7 @@
 # Project Primer - VidIQ Telegram Bot
 * Deployed on Railway; auto-deploys from GitHub on push.
 * Express app has trust proxy enabled and dynamically constructs redirect URI.
-* Disabled keepAlive on Google auth transporter to resolve the "Premature close" socket error.
+* Configured global undici dispatcher and transporter to disable keepAlive, bypassing Node.js native fetch "Premature close" errors.
 
 ## Next Steps
 1. Add callback URIs (`https://<domain>/api/auth/youtube/callback`) to Google Console.
