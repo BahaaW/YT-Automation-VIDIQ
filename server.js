@@ -224,8 +224,9 @@ app.get('/api/auth/youtube', (req, res) => {
   
   // Dynamically set redirect URI based on the request host/protocol if not explicitly overridden in environment
   if (!process.env.YOUTUBE_REDIRECT_URI) {
-    const proto = req.protocol;
     const host = req.get('host');
+    const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+    const proto = isLocal ? req.protocol : 'https';
     youtubeRedirectUri = `${proto}://${host}/api/auth/youtube/callback`;
     oauth2Client.redirectUri = youtubeRedirectUri;
   }
@@ -258,8 +259,9 @@ app.get('/api/auth/youtube/callback', async (req, res) => {
 
   // Dynamically set redirect URI based on the request host/protocol if not explicitly overridden in environment
   if (!process.env.YOUTUBE_REDIRECT_URI) {
-    const proto = req.protocol;
     const host = req.get('host');
+    const isLocal = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+    const proto = isLocal ? req.protocol : 'https';
     youtubeRedirectUri = `${proto}://${host}/api/auth/youtube/callback`;
     oauth2Client.redirectUri = youtubeRedirectUri;
   }
