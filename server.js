@@ -85,7 +85,6 @@ function log(msg) {
 
 // === YouTube OAuth (kept for the upload flow) ===
 
-const oauthTokenPath = path.join(__dirname, 'oauth_token.json');
 const clientSecretsPath = path.join(__dirname, 'client_secrets.json');
 let oauth2Client = null;
 
@@ -115,9 +114,10 @@ function initYoutubeAuth() {
 
   try {
     oauth2Client = new google.auth.OAuth2(clientId, clientSecret, redirectUri || `http://localhost:${PORT}/api/auth/youtube/callback`);
-    if (fs.existsSync(oauthTokenPath)) {
-      oauth2Client.setCredentials(JSON.parse(fs.readFileSync(oauthTokenPath, 'utf8')));
-      log('YouTube OAuth credentials loaded from file.');
+    // Load tokens from config.json (survives Railway deploys)
+    if (config.youtube_tokens && config.youtube_tokens.access_token) {
+      oauth2Client.setCredentials(config.youtube_tokens);
+      log('YouTube OAuth credentials loaded from config.');
     }
   } catch (e) {
     log('Failed to initialize YouTube auth: ' + e.message);
@@ -194,8 +194,9 @@ app.get('/api/auth/youtube/callback', async (req, res) => {
   try {
     const { tokens } = await oauth2Client.getToken(code);
     oauth2Client.setCredentials(tokens);
-    fs.writeFileSync(oauthTokenPath, JSON.stringify(tokens, null, 2), 'utf8');
-    log('YouTube authorization token saved.');
+    config.youtube_tokens = tokens;
+    saveConfig();
+    log('YouTube authorization token saved to config.');
     res.send('<html><body><h3>Authorization Successful!</h3><p>You can close this tab. Return to the bot.</p><script>setTimeout(() => window.close(), 3000)</script></body></html>');
   } catch (e) {
     log('OAuth exchange failed: ' + e.message);
