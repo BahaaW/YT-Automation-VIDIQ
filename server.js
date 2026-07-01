@@ -150,8 +150,9 @@ function initYoutubeAuth() {
     const httpAgent = new http.Agent({ keepAlive: false });
     oauth2Client.transporter.defaults = {
       ...(oauth2Client.transporter.defaults || {}),
-      httpsAgent,
-      httpAgent
+      agent: (uri) => {
+        return uri.protocol === 'http:' ? httpAgent : httpsAgent;
+      }
     };
 
     // Load tokens from config.json (survives Railway deploys)
