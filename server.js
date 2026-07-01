@@ -265,9 +265,10 @@ app.get('/api/auth/youtube/callback', async (req, res) => {
   }
 
   if (!code) {
-    log('YouTube OAuth callback missing authorization code. Query: ' + JSON.stringify(req.query));
+    log(`YouTube OAuth callback missing authorization code. URL: ${req.originalUrl} | Query: ${JSON.stringify(req.query)}`);
     return res.status(400).send(`<html><body>
       <h3>Missing Authorization Code</h3>
+      <p>Original URL received: <code>${escapeHtml(req.originalUrl)}</code></p>
       <p>Query parameters received: <code>${escapeHtml(JSON.stringify(req.query))}</code></p>
       <p>Make sure this redirect URI:</p>
       <pre>${youtubeRedirectUri}</pre>
